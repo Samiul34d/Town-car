@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Advanced Racing Game</title>
+<style>
+body { margin:0; overflow:hidden; background:#333; font-family:Arial,sans-serif;}
+#gameCanvas { background:#444; display:block; margin:0 auto; touch-action:none; border:3px solid #fff; }
+#joystick {
+    position:absolute;
+    bottom:50px;
+    left:50%;
+    transform:translateX(-50%);
+    width:150px;
+    height:150px;
+    border-radius:50%;
+    background:rgba(255,255,255,0.2);
+    touch-action:none;
+}
+#stick {
+    position:absolute;
+    left:50%;
+    top:50%;
+    transform:translate(-50%,-50%);
+    width:40px;
+    height:40px;
+    border-radius:50%;
+    background:rgba(255,165,0,0.8);
+}
+#gameOverScreen {
+    position:absolute;
+    top:0; left:0; width:100%; height:100%;
+    background:rgba(0,0,0,0.8);
+    display:flex; flex-direction:column; justify-content:center; align-items:center;
+    color:white; font-size:24px; display:none;
+}
+#gameOverScreen button {
+    margin-top:15px; padding:10px 20px; font-size:20px; background:#ff9500; border:none; border-radius:5px; color:white; cursor:pointer;
+}
+#exitBtn { background:#e74c3c; }
+</style>
+</head>
+<body>
+<canvas id="gameCanvas" width="300" height="500"></canvas>
+<div id="joystick"><div id="stick"></div></div>
+<div id="gameOverScreen">
+    <div id="gameOverText"></div>
+    <button id="playAgain">Play Again</button>
+    <button id="exitBtn">Exit</button>
+</div>
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+const road = { x:50, y:0, width:200, height:canvas.height };
+let playerCar = { x:135, y:400, width:30, height:55, speed:3, velX:0, boost:false };
+let obstacles = [];
+let trees = [];
+let score=0;
+let gameOver=false;
+let topScore = 0;
+
+// Special Flag
+let flag = { x:0, y:-100, width:30, height:30, active:false, timer:0 };
+
+// Draw road
+function drawRoad(){
+    ctx.fillStyle='#555';
+    ctx.fillRect(road.x,road.y,road.width,road.height);
+    ctx.strokeStyle='#fff';
+    ctx.lineWidth=3;
+    ctx.setLineDash([15,15]);
+    ctx.beginPath();
+    ctx.moveTo(road.x+road.width/2,0);
+    ctx.lineTo(road.x+road.width/2,canvas.height);
+    ctx.stroke();
+    ctx.setLineDash([]);
+}
+
+// Draw trees
+function drawTrees(){
+    trees.forEach(t=>{
+        ctx.fillStyle='green';
+        ctx.fillRect(t.x,t.y,10,30);
+    });
+}
+
+// Move trees
+function moveTrees(){
+    let speed = playerCar.boost?10:5 + score*0.001;
+    trees.forEach(t=>t.y+=speed);
+    trees = trees.filter(t=>t.y<canvas.height);
+    if(Math.random()<0.02){
+        let side=Math.random()<0.5?road.x-20:road.x+road.width+5;
+        trees.push({x:side,y:-30});
+    }
+}
+
+// Draw player car
+function drawPlayerCar(){
+    ctx.fillStyle='red';
+    ctx.fillRect(playerCar.x,playerCar.y,playerCar.width,playerCar.height);
+    ctx.fillStyle='#00f';
+    ctx.fillRect(playerCar.x+3,playerCar.y+6,playerCar.width-6,14);
+    ctx.fillStyle='#000';
+    ctx.fillRect(playerCar.x+2,playerCar.y+3,6,10);
+    ctx.fillRect(playerCar.x+playerCar.width-8,playerCar.y+3,6,10);
+    ctx.fillRect(playerCar.x+2,playerCar.y+playerCar.height-12,6,10);
+    ctx.fillRect(playerCar.x+playerCar.width-8,playerCar.y+playerCar.height-12,6,10);
+}
+
+// Draw obstacles
+function drawObstacles(){
+    obstacles.forEach(obs=>{
+        ctx.fillStyle='yellow';
+        ctx.fillRect(obs.x,obs.y,obs.width,obs.height);
+        ctx.fillStyle='#000';
+        ctx.fillRect(obs.x+2,obs.y+2,6,10);
+        ctx.fillRect(obs.x+obs.width-8,obs.y+2,6,10);
+        ctx.fillRect(obs.x+2,obs.y+obs.height-12,6,10);
+        ctx.fillRect(obs.x+obs.width-8,obs.y+obs.height-12,6,10);
+    });
+}
+
+// Draw flag
+function drawFlag(){
+    ctx.fillStyle='blue';
+    ctx.fillRect(flag.x, flag.y, flag.width, flag.height);
+}
+
+// Move obstacles with smart spawn
+function moveObstacles(){
+    let speed = (playerCar.boost?10:5) + score*0.001; // slower increment
+    obstacles.forEach(obs=>obs.y+=speed);
+    obstacles = obstacles.filter(obs=>obs.y<canvas.height);
+
+    // Smart spawning
+    if(!flag.active && Math.random()<0.02){
+        let width=30;
+        let x=road.x + Math.random()*(road.width-width);
+
+        // Prevent vertical overlap
+        let overlap = obstacles.some(obs => Math.abs(obs.y + obs.height - (-55)) < 80); 
+        if(!overlap){
+            obstacles.push({x:x, y:-55, width:width, height:55});
+        }
+    }
+}
+
+// Move flag
+function moveFlag(){
+    let speed = (playerCar.boost?10:5) + score*0.001;
+    flag.y += speed;
+    if(flag.y>canvas.height){
+        flag.active=false;
+        flag.y=-100;
+    }
+}
+
+// Check collision
+function checkCollision(){
+    for(let obs of obstacles){
+        if(playerCar.x<obs.x+obs.width && playerCar.x+playerCar.width>obs.x &&
+           playerCar.y<obs.y+obs.height && playerCar.y+playerCar.height>obs.y){
+               if(!flag.active) gameOver=true;
+           }
+    }
+    // Flag touched
+    if(playerCar.x<flag.x+flag.width && playerCar.x+playerCar.width>flag.x &&
+       playerCar.y<flag.y+flag.height && playerCar.y+playerCar.height>flag.y){
+           flag.active=true;
+           flag.timer = 30; // 30 seconds
+           obstacles=[];
+           flag.y=-100; // hide flag
+    }
+}
+
+// Draw score
+function drawScore(){
+    ctx.fillStyle='#fff';
+    ctx.font='20px Arial';
+    ctx.fillText('Score:'+Math.floor(score/2),10,30); // slower score
+    if(flag.active){
+        ctx.fillText('Flag Active: '+Math.ceil(flag.timer)+'s',10,60);
+    }
+}
+
+// Update flag timer
+function updateFlagTimer(){
+    if(flag.active){
+        flag.timer -= 1/60;
+        if(flag.timer<=0){
+            flag.active=false;
+        }
+    }
+}
+
+// Game loop
+function gameLoop(){
+    if(gameOver){
+        if(Math.floor(score/2)>topScore) topScore=Math.floor(score/2);
+        document.getElementById('gameOverText').innerHTML=`Game Over<br>Score: ${Math.floor(score/2)}<br>Top Score: ${topScore}`;
+        document.getElementById('gameOverScreen').style.display='flex';
+        return;
+    }
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    drawRoad();
+    drawTrees();
+    drawPlayerCar();
+    drawObstacles();
+
+    // Flag spawn occasionally
+    if(!flag.active && Math.random()<0.001){
+        flag.x = road.x + Math.random()*(road.width-flag.width);
+        flag.y=-30;
+    }
+    if(!flag.active) drawFlag();
+
+    drawScore();
+    moveObstacles();
+    moveTrees();
+    moveFlag();
+    checkCollision();
+    updateFlagTimer();
+
+    playerCar.x += playerCar.velX;
+    if(playerCar.x<road.x) playerCar.x=road.x;
+    if(playerCar.x+playerCar.width>road.x+road.width) playerCar.x=road.x+road.width-playerCar.width;
+
+    score++;
+    requestAnimationFrame(gameLoop);
+}
+
+gameLoop();
+
+// Joystick
+const joystick=document.getElementById('joystick');
+const stick=document.getElementById('stick');
+let dragging=false;
+
+joystick.addEventListener('touchstart',(e)=>{ dragging=true; });
+joystick.addEventListener('touchend',(e)=>{ dragging=false; playerCar.velX=0; stick.style.transform='translate(-50%,-50%)'; });
+joystick.addEventListener('touchmove',(e)=>{
+    if(!dragging) return;
+    const rect=joystick.getBoundingClientRect();
+    let x=e.touches[0].clientX - rect.left - rect.width/2;
+    if(x<-60) x=-60; if(x>60) x=60;
+    stick.style.transform=`translate(${x}px,-50%)`;
+    playerCar.velX=(x/60)*playerCar.speed*1.5; // smoother movement
+});
+
+// Boost by double tap
+let lastTap=0;
+canvas.addEventListener('touchstart',e=>{
+    let now=Date.now();
+    if(now-lastTap<300) playerCar.boost=true;
+    lastTap=now;
+});
+canvas.addEventListener('touchend',e=>{ playerCar.boost=false; });
+
+// Play Again button
+document.getElementById('playAgain').addEventListener('click',()=>{
+    score=0;
+    playerCar.x=135;
+    playerCar.velX=0;
+    obstacles=[];
+    trees=[];
+    flag.active=false;
+    flag.y=-100;
+    gameOver=false;
+    document.getElementById('gameOverScreen').style.display='none';
+    gameLoop();
+});
+
+// Exit button
+document.getElementById('exitBtn').addEventListener('click',()=>{
+    window.close(); // close tab (may not work on all mobile browsers)
+    alert("Thank you for playing!"); // fallback
+});
+</script>
+</body>
+</html>
